@@ -186,9 +186,14 @@
             filter: url(#shadow); /* Apply shadow filter */
         }
         .mind-map-rect:hover {
-            fill: #c7d8ff;
-            stroke: var(--primary-purple);
+            filter: url(#hover-shadow); /* Apply hover shadow filter */
         }
+        
+        /* Define hover shadow filter */
+        #hover-shadow {
+            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.25));
+        }
+
         /* Specific rect colors for root and categories/items based on performance */
         .mind-map-rect.root {
             fill: var(--primary-purple); /* Default root color */
@@ -205,6 +210,8 @@
         @media print {
             body {
                 background-color: #fff !important;
+                margin: 0;
+                padding: 0;
             }
             .gradient-bg, footer, .file-input, .loading-screen, .modal-overlay, .tab-buttons, .filter-section, .print-button-container {
                 display: none !important;
@@ -213,6 +220,8 @@
                 margin: 0 !important;
                 padding: 0 !important;
                 width: 100% !important;
+                box-shadow: none !important; /* Remove shadows for print */
+                border: none !important; /* Remove borders for print */
             }
             .card {
                 box-shadow: none !important;
@@ -223,11 +232,17 @@
             .mind-map-rect {
                 filter: none !important; /* Remove shadow for print */
             }
-            /* Ensure charts render correctly for print */
-            canvas {
+            /* Ensure charts and SVG render correctly for print */
+            canvas, svg {
                 max-width: 100% !important;
                 height: auto !important;
+                display: block !important;
+                visibility: visible !important;
                 page-break-inside: avoid;
+            }
+            /* Ensure text is visible and not cut off */
+            .mind-map-node-text {
+                fill: #000 !important; /* Ensure black text for printing */
             }
         }
 
@@ -371,6 +386,7 @@
             const parsedData = [];
 
             if (!jsonData || jsonData.length < 2) { // Need at least 2 rows: headers and one data row
+                console.warn('No data or insufficient rows in Excel file.');
                 return parsedData;
             }
 
@@ -394,7 +410,7 @@
                 'المتوسط العام': 'average',
                 'نقاط القوة': 'strengths',
                 'السليبات والضعف': 'weaknesses',
-                'ملاحظات الأمين': 'notes'
+                'ملاحظات الأمين': 'notes' // This is the key for "ملاحظات الأمين"
             };
 
             // Build column map from actual headers to internal keys
@@ -408,11 +424,13 @@
                 }
             });
 
+            console.log('Parsed Excel Headers (columnMap):', columnMap);
+
             // Check if all essential columns are found
             const essentialColumns = ['name', 'average']; // Minimum required columns
             for (const col of essentialColumns) {
                 if (columnMap[col] === undefined) {
-                    console.warn(`Missing essential column: ${col}. Data parsing might be incomplete.`);
+                    console.warn(`Missing essential column: '${col}'. Data parsing might be incomplete.`);
                 }
             }
 
@@ -428,10 +446,10 @@
                 
                 // Only add data if name is present and not '#N/A'
                 if (name && name !== '#N/A') {
-                    parsedData.push({
+                    const serverData = {
                         name: name,
                         service: String(row[columnMap.service] || 'غير محدد').trim(),
-                        class: String(row[columnMap.class] || 'غير مححدد').trim(),
+                        class: String(row[columnMap.class] || 'غير محدد').trim(),
                         axis1: safeParseFloat(row[columnMap.axis1]),
                         axis2: safeParseFloat(row[columnMap.axis2]),
                         axis3: safeParseFloat(row[columnMap.axis3]),
@@ -441,11 +459,15 @@
                         average: safeParseFloat(row[columnMap.average]),
                         strengths: String(row[columnMap.strengths] || '').trim(),
                         weaknesses: String(row[columnMap.weaknesses] || '').trim(),
-                        notes: String(row[columnMap.notes] || '').trim(),
+                        notes: String(row[columnMap.notes] || '').trim(), // Ensure 'notes' is correctly mapped here
                         fullName: name // Store full name for display
-                    });
+                    };
+                    parsedData.push(serverData);
+                    // Log the notes for each server for debugging
+                    console.log(`Debug: Server: ${serverData.name}, Notes: "${serverData.notes}"`);
                 }
             }
+            console.log('Parsed Data from Excel (Full Array):', parsedData);
             return parsedData;
         };
 
@@ -695,18 +717,25 @@
                 const nodes = new Map();
                 const links = [];
 
+                console.log('MindMap: selectedService:', selectedService);
+                console.log('MindMap: initial data length:', data.length);
+
                 // If no specific service is selected, show a prompt or a generic root
                 if (selectedService === 'الكل' || !selectedService || data.length === 0) {
                     const root = { id: 'root-prompt', label: 'الرجاء اختيار خدمة لعرض الخريطة الذهنية', type: 'root', children: [], icon: 'fas fa-info-circle' };
                     nodes.set(root.id, root);
+                    console.log('MindMap: Showing prompt/no data root.');
                     return { nodes, links };
                 }
 
                 // Filter data for the selected service
                 const serviceData = data.filter(d => d.service === selectedService);
+                console.log(`MindMap: serviceData for "${selectedService}" length:`, serviceData.length);
+
                 if (serviceData.length === 0) {
                     const root = { id: 'root-no-data', label: `لا توجد بيانات للخادمة: ${selectedService}`, type: 'root', children: [], icon: 'fas fa-exclamation-triangle' };
                     nodes.set(root.id, root);
+                    console.log('MindMap: No data for selected service, showing no data root.');
                     return { nodes, links };
                 }
 
@@ -721,6 +750,7 @@
 
                 // 2. Level 1: Classes within the selected service
                 const uniqueClasses = Array.from(new Set(serviceData.map(d => d.class).filter(c => c && c.trim() !== '' && c !== 'غير محدد')));
+                console.log('MindMap: Unique Classes:', uniqueClasses);
                 
                 uniqueClasses.forEach(cls => {
                     const classServers = serviceData.filter(d => d.class === cls);
@@ -742,7 +772,8 @@
                         links.push({ source: classNode.id, target: serverNode.id });
                     });
                 });
-
+                console.log('MindMap: Final Nodes:', nodes);
+                console.log('MindMap: Final Links:', links);
                 return { nodes, links };
             }, [data, selectedService, getNodeColor]);
 
@@ -882,7 +913,7 @@
 
                 // Set root node Y after all other nodes are positioned to truly center it
                 const minNodeY = Array.from(calculatedPositions.values()).reduce((min, pos) => Math.min(min, pos.y), Infinity);
-                const maxNodeY = Array.from(calculatedPositions.values()).reduce((max, pos) => Math.max(max, pos.y), -Infinity);
+                const maxNodeY = Array.from(calculatedPositions.values()).reduce((max, pos) => Math.max(max, pos.y), -Infinity); 
                 
                 if (isFinite(minNodeY) && isFinite(maxNodeY)) {
                     const overallCenterY = (minNodeY + maxNodeY) / 2;
@@ -921,7 +952,7 @@
                 const fallbackNode = mindMapData.nodes.values().next().value;
                 return (
                     <div className="bg-gradient-to-br from-white to-gray-50 p-8 rounded-xl shadow-lg border border-gray-100 text-center h-full min-h-[600px] flex flex-col items-center justify-center">
-                        <i className={fallbackNode.icon + " fa-fw mx-auto text-gray-400 mb-4 text-5xl"}></i>
+                        <i className={`${fallbackNode.icon} fa-fw mx-auto text-gray-400 mb-4 text-5xl`}></i> {/* Changed concatenation to template literal */}
                         <h3 className="text-xl font-bold text-gray-700">{fallbackNode.label}</h3>
                         {fallbackNode.id === 'root-prompt' && <p className="text-gray-500">يرجى استخدام قائمة "نوع الخدمة" في الأعلى لتحديد خدمة معينة.</p>}
                     </div>
@@ -938,6 +969,10 @@
                             {/* Define shadow filter for nodes */}
                             <filter id="shadow" x="-50%" y="-50%" width="200%" height="200%">
                                 <feDropShadow dx="2" dy="2" stdDeviation="3" floodColor="#000" floodOpacity="0.2"/>
+                            </filter>
+                             {/* Define hover shadow filter for nodes */}
+                            <filter id="hover-shadow" x="-50%" y="-50%" width="200%" height="200%">
+                                <feDropShadow dx="0" dy="4" stdDeviation="8" floodColor="#000" floodOpacity="0.25"/>
                             </filter>
                         </defs>
                         {/* Render links (lines connecting nodes) */}
@@ -978,12 +1013,17 @@
                                 fillColor = node.color ? node.color + '20' : '#a7c0f0'; // Lighter tint of average color
                                 strokeColor = node.color || 'var(--primary-purple)';
                             } else { // Items (Servers)
-                                fillColor = node.color ? node.color + '10' : 'var(--light-blue-bg)'; // Even lighter tint
+                                fillColor = node.color || 'var(--light-blue-bg)'; // Use full color for server nodes
                                 strokeColor = node.color || 'var(--border-color)';
+                                textColor = 'var(--dark-text)'; // Ensure black text for server names
                             }
 
                             // Pre-calculate icon color
-                            const iconColor = node.type === 'root' ? 'white' : 'var(--primary-purple)';
+                            let iconColor = node.type === 'root' ? 'white' : 'var(--primary-purple)';
+                            if (node.type === 'item') { // Ensure server icons match rect color if desired, or keep default
+                                iconColor = node.color;
+                            }
+
 
                             return (
                                 <g 
@@ -1004,7 +1044,8 @@
                                         x={rectX} y={rectY} 
                                         width={rectWidth} height={rectHeight} 
                                         rx="8" ry="8"
-                                        style={{ fill: fillColor, stroke: strokeColor, strokeWidth: 1, filter: 'url(#shadow)' }}
+                                        style={{ fill: fillColor, stroke: strokeColor, strokeWidth: 1 }}
+                                        className="mind-map-rect" /* Add class for hover effect */
                                     />
                                     {node.icon && (
                                         <foreignObject x={rectX + 10} y={rectY + 8} width="24" height="24"> {/* Icon on the right */}
@@ -1068,10 +1109,12 @@
             const serviceDoughnutChartRef = useRef(null); 
             const chartInstance = useRef({}); // To store Chart.js instances for multiple charts
 
-            // Diverse colors for charts
+            // Diverse colors for charts - EXPANDED FOR MORE DISTINCTNESS
             const chartColors = [
                 '#6a11cb', '#2575fc', '#6dd5ed', '#4facfe', '#0cbaba', '#00c6fb', '#005bea', '#00d2ff',
-                '#ff7e5f', '#feb47b', '#ffc72c', '#f7b731', '#f97316', '#ff4b1f', '#f02fc2', '#6094ea'
+                '#ff7e5f', '#feb47b', '#ffc72c', '#f7b731', '#f97316', '#ff4b1f', '#f02fc2', '#6094ea',
+                '#a1c4fd', '#c2e9fb', '#cfd9ed', '#e0c3fc', '#8ec5fc', '#e0a9f8', '#c9ffbf', '#ffafbd',
+                '#a7e9af', '#ffc3a0', '#ffc72c', '#c3a0ff', '#a0c3ff', '#ff8c7a', '#7affc3', '#c3ff8c'
             ];
             
             // Function to show custom message
@@ -2079,7 +2122,7 @@
                                                                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-600 uppercase tracking-wider">الخدمة</th>
                                                                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-600 uppercase tracking-wider">الفصل</th>
                                                                     <th className="px-6 py-3 text-right text-xs font-medium text-gray-600 uppercase tracking-wider">التقييم</th>
-                                                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-600 uppercase tracking-wider">التفاصيل</th>
+                                                                    <th className="px-6 py-4 text-right text-xs font-medium text-gray-600 uppercase tracking-wider">التفاصيل</th>
                                                                 </tr>
                                                             </thead>
                                                             <tbody className="bg-white divide-y divide-gray-200">
@@ -2251,6 +2294,3 @@
     </script>
 </body>
 </html>
-```
-<br/>
-لقد قمت بتحديث Canvas الخاص بك. أتمنى أن يعمل بشكل جيد الآن! إذا واجهت أي مشاكل أخرى أو كان لديك أي أسئلة، فلا تتردد في سؤا
